@@ -11,11 +11,11 @@ contract DreamAcademyLending is IDreamAcademyLending, Ownable{
     IPriceOracle dreamoracle;
     IERC20 public usdc;
 
-
     uint public constant INTEREST_RATE = 1000000000315522921573372069;
     uint256 public constant LTV = 50;
     uint256 public constant LIQUIDATION_THRESHOLD = 75;
     uint public constant DECIMAL = 10**18;
+    uint256 public constant BLOCK_PER_DAY = 7200;
 
     constructor (IPriceOracle _dreamoracle, address _usdc) {
         dreamoracle = _dreamoracle;
@@ -26,7 +26,7 @@ contract DreamAcademyLending is IDreamAcademyLending, Ownable{
         uint usdcBalance; //balance of USDC
         uint usdcDebt; // debt of USDC LP tokens
         uint ethCollateral; //balance of ETH Collateral
-        uint lastBorrowTime; // last time the user borrowed
+        uint lastBorrowBlock; // last time the user borrowed
     }
 
     mapping(address => User) public users;
@@ -65,13 +65,22 @@ contract DreamAcademyLending is IDreamAcademyLending, Ownable{
         require(amount <= userMaxBorrow, "User Impossible to Borrow.");
         require(amount <= maxBorrowAmount, "Not enough Amount.");
         users[msg.sender].usdcDebt += amount;
-        users[msg.sender].lastBorrowTime = block.timestamp;
+        users[msg.sender].lastBorrowBlock = block.number;
         usdc.transfer(msg.sender, amount);
         emit Borrow(msg.sender, tokenAddress, amount);
     }
 
     function repay(address tokenAddress, uint256 amount) public {
-
+        require(amount > 0, "amount cannot be zero");
+        require(tokenAddress == address(usdc), "only USDC can be borrowed");
+        User storage user = users[msg.sender];
+        uint256 interest = getInterest(user.usdcDebt, user.lastBorrowBlock, block.number);
+        require(user.usdcDebt >= amount, "amount cannot exceed debt");
+        user.usdcDebt += interest;
+        user.lastBorrowBlock = block.number;
+        user.usdcDebt -= amount;
+        usdc.transferFrom(msg.sender, address(this), amount);
+        emit Repay(msg.sender, tokenAddress, amount);
     }
 
     function liquidate(address user, address tokenAddress, uint256 amount) public {
@@ -98,6 +107,12 @@ contract DreamAcademyLending is IDreamAcademyLending, Ownable{
         uint256 Debt = users[user].usdcDebt;
 
         return maxBorrowAmount > Debt ? maxBorrowAmount - Debt : 0;
+    }
+
+    function getInterest(uint256 usdcDebt, uint256 lastBlock, uint256 BlockNum) public view returns (uint256) {
+        uint256 blocksElapsed = BlockNum - lastBlock;
+        uint256 interest = (usdcDebt * ((INTEREST_RATE  ** blocksElapsed) -1)) / DECIMAL;
+        return interest;
     }
 
 }
