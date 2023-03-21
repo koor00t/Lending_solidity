@@ -17,7 +17,7 @@ function withdraw(address tokenAddress, uint256 amount) external;
 */
 
 interface IDreamAcademyLending {
-    function deposit(address tokenAddress, uint256 amount) external;
+    function deposit(address tokenAddress, uint256 amount) external payable;
     function borrow(address tokenAddress, uint256 amount) external;
     function repay(address tokenAddress, uint256 amount) external;
     function liquidate(address user, address tokenAddress, uint256 amount) external;
