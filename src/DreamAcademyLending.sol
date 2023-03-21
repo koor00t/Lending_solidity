@@ -9,10 +9,10 @@ import "./interfaces/IPriceOracle.sol";
 
 contract DreamAcademyLending is IDreamAcademyLending, Ownable{
     IPriceOracle dreamoracle;
-    IERC20 public immutable usdc;
-    IERC20 public immutable eth;
+    IERC20 public usdc;
 
-    uint public constant interestRate = 10**16;
+
+    uint public constant INTEREST_RATE = 1000000000315522921573372069;
     uint256 public constant LTV = 50;
     uint256 public constant LIQUIDATION_THRESHOLD = 75;
     uint public constant DECIMAL = 10**18;
@@ -20,13 +20,12 @@ contract DreamAcademyLending is IDreamAcademyLending, Ownable{
     constructor (IPriceOracle _dreamoracle, address _usdc) {
         dreamoracle = _dreamoracle;
         usdc = IERC20(_usdc);
-        eth = IERC20(address(this));
     }
     
     struct User {
-        uint ethBalance; //balance of ETH LP tokens
-        uint usdcBalance; //balance of USDC LP tokens
+        uint usdcBalance; //balance of USDC
         uint usdcDebt; // debt of USDC LP tokens
+        uint ethCollateral; //balance of ETH Collateral
         uint lastBorrowTime; // last time the user borrowed
     }
 
@@ -43,22 +42,32 @@ contract DreamAcademyLending is IDreamAcademyLending, Ownable{
     }
 
     function deposit(address tokenAddress, uint256 amount) external payable {
-        require(tokenAddress == address(usdc) || tokenAddress == address(eth), "Invalid token address");
-        require(amount > 0, "Amount must be positive.");
+        //address(0) = ETH
         if (tokenAddress == address(0)) {
-            require(users[msg.sender].usdcBalance >= amount, "Insufficient balance.");
-            users[msg.sender].usdcBalance -= amount;
-            usdc.transfer(msg.sender, amount);
+            require(msg.value > 0, "ETH deposit must not zero.");
+            require(msg.value >= amount, "ETH deposit must be equal or more than msg.value");
+            users[msg.sender].ethCollateral += msg.value;
+            emit Deposit(msg.sender, tokenAddress, msg.value);
         } else {
-            require(users[msg.sender].ethBalance >= amount && getLTV(msg.sender) <= LTV * DECIMAL/100, "Insufficient collateral or LTV exceeded");
-            users[msg.sender].ethBalance -= amount;
-            eth.transfer(msg.sender, amount);
+            require(amount > 0, "USDC deposit must not zero.");
+            User storage user = users[msg.sender];
+            user.usdcBalance += amount;
+            usdc.transferFrom(msg.sender, address(this), amount);
+            emit Deposit(msg.sender, tokenAddress, amount);
         }
-        emit Deposit(msg.sender, tokenAddress, amount);
     }
 
     function borrow(address tokenAddress, uint256 amount) public {
-
+        require(amount > 0, "amount cannot be zero");
+        require(tokenAddress == address(usdc), "only USDC can be borrowed");
+        uint256 userMaxBorrow = getUserLTV(msg.sender);
+        uint256 maxBorrowAmount = getBorrowLTV(amount);
+        require(amount <= userMaxBorrow, "User Impossible to Borrow.");
+        require(amount <= maxBorrowAmount, "Not enough Amount.");
+        users[msg.sender].usdcDebt += amount;
+        users[msg.sender].lastBorrowTime = block.timestamp;
+        usdc.transfer(msg.sender, amount);
+        emit Borrow(msg.sender, tokenAddress, amount);
     }
 
     function repay(address tokenAddress, uint256 amount) public {
@@ -77,11 +86,18 @@ contract DreamAcademyLending is IDreamAcademyLending, Ownable{
 
     }
 
-    
-    // Function for getting LTV of a user (in wei)
-    function getLTV(address user) public view returns (uint) {
-        if (users[user].ethBalance == 0) return 0;
-        uint256 ethValue = users[user].ethBalance * dreamoracle.getPrice(address(eth)) / DECIMAL;
-        return users[user].usdcDebt * DECIMAL / ethValue;
+    function getBorrowLTV(uint256 amount) public view returns (uint256) {
+        uint256 ethValue = (amount * dreamoracle.getPrice(address(0))) / DECIMAL; // get total ETH value in USDC terms
+        return ethValue * LTV / 100; // return additional LTV ratio (borrow / collateral)
     }
+
+    function getUserLTV(address user) public view returns (uint256) {
+        uint256 ethCollateral = users[user].ethCollateral;
+        uint256 CollateralusdcValue = (ethCollateral * dreamoracle.getPrice(address(0))) / DECIMAL;
+        uint256 maxBorrowAmount = (CollateralusdcValue * LTV) / 100;
+        uint256 Debt = users[user].usdcDebt;
+
+        return maxBorrowAmount > Debt ? maxBorrowAmount - Debt : 0;
+    }
+
 }
