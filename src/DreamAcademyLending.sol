@@ -26,7 +26,7 @@ contract DreamAcademyLending is IDreamAcademyLending, Ownable{
         uint usdcBalance; //balance of USDC
         uint usdcDebt; // debt of USDC LP tokens
         uint ethCollateral; //balance of ETH Collateral
-        uint lastBorrowBlock; // last time the user borrowed
+        uint lastBorrowBlock; // last block the user borrowed
     }
 
     mapping(address => User) public users;
@@ -57,7 +57,7 @@ contract DreamAcademyLending is IDreamAcademyLending, Ownable{
         }
     }
 
-    function borrow(address tokenAddress, uint256 amount) public {
+    function borrow(address tokenAddress, uint256 amount) external {
         require(amount > 0, "amount cannot be zero");
         require(tokenAddress == address(usdc), "only USDC can be borrowed");
         uint256 userMaxBorrow = getUserLTV(msg.sender);
@@ -70,7 +70,7 @@ contract DreamAcademyLending is IDreamAcademyLending, Ownable{
         emit Borrow(msg.sender, tokenAddress, amount);
     }
 
-    function repay(address tokenAddress, uint256 amount) public {
+    function repay(address tokenAddress, uint256 amount) external {
         require(amount > 0, "amount cannot be zero");
         require(tokenAddress == address(usdc), "only USDC can be repay");
         User storage user = users[msg.sender];
@@ -83,16 +83,17 @@ contract DreamAcademyLending is IDreamAcademyLending, Ownable{
         emit Repay(msg.sender, tokenAddress, amount);
     }
 
-    function liquidate(address user, address tokenAddress, uint256 amount) public {
+    function liquidate(address user, address tokenAddress, uint256 amount) external {
         require(amount > 0, "amount cannot be zero");
         require(tokenAddress == address(usdc), "only USDC can be liquidated");
         User storage user_s = users[user];
-        usdc.transferFrom(user, address(this), amount);
+        require(healthCheck(user), "Didn't liquidator");
         user_s.usdcDebt -= amount;
+        usdc.transferFrom(user, address(this), amount);
         emit Liquidate(user, tokenAddress, amount);
     }
 
-    function withdraw(address tokenAddress, uint256 amount) public {
+    function withdraw(address tokenAddress, uint256 amount) external {
         require(amount > 0, "amount cannot be zero");
         if (tokenAddress == address(0)) {
             require(users[msg.sender].ethCollateral >= amount,"Insufficient balance");
@@ -105,20 +106,20 @@ contract DreamAcademyLending is IDreamAcademyLending, Ownable{
         }
     }
 
-    function getAccruedSupplyAmount(address tokenAddress) external payable returns (uint256) {
+    function getAccruedSupplyAmount(address tokenAddress) public payable returns (uint256) {
     }
 
-    function getCurrentPrice() public view returns (uint256 ethPrice, uint256 usdcPrice) {
+    function getCurrentPrice() internal view returns (uint256 ethPrice, uint256 usdcPrice) {
         ethPrice = dreamoracle.getPrice(address(0));
         usdcPrice = dreamoracle.getPrice(address(usdc));
     }
 
-    function getBorrowLTV(uint256 amount) public view returns (uint256) {
+    function getBorrowLTV(uint256 amount) internal view returns (uint256) {
         uint256 ethValue = (amount * dreamoracle.getPrice(address(0))) / DECIMAL;
         return ethValue * LTV / 100;
     }
 
-    function getUserLTV(address user) public view returns (uint256) {
+    function getUserLTV(address user) internal view returns (uint256) {
         uint256 ethCollateral = users[user].ethCollateral;
         uint256 CollateralusdcValue = (ethCollateral * dreamoracle.getPrice(address(0))) / DECIMAL;
         uint256 maxBorrowAmount = (CollateralusdcValue * LTV) / 100;
@@ -127,14 +128,18 @@ contract DreamAcademyLending is IDreamAcademyLending, Ownable{
         return maxBorrowAmount > Debt ? maxBorrowAmount - Debt : 0;
     }
 
-    function getInterest(uint256 usdcDebt, uint256 lastBlock, uint256 BlockNum) public view returns (uint256) {
+    function healthCheck(address user) internal view returns (bool) {
+        uint256 curDebt = users[user].usdcDebt;
+        uint256 ethColl = users[user].ethCollateral;
+        uint256 maxBorrowAmount = getBorrowLTV(ethColl);
+
+        return curDebt <= maxBorrowAmount;
+    }
+
+    function getInterest(uint256 usdcDebt, uint256 lastBlock, uint256 BlockNum) internal view returns (uint256) {
         uint256 blocksElapsed = BlockNum - lastBlock;
         uint256 interest = (usdcDebt * ((INTEREST_RATE  ** blocksElapsed) -1)) / DECIMAL;
         return interest;
-    }
-
-    function healthCheck(address user) public view returns (bool) {
-
     }
 
 }
