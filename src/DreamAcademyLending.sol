@@ -72,7 +72,7 @@ contract DreamAcademyLending is IDreamAcademyLending, Ownable{
 
     function repay(address tokenAddress, uint256 amount) public {
         require(amount > 0, "amount cannot be zero");
-        require(tokenAddress == address(usdc), "only USDC can be borrowed");
+        require(tokenAddress == address(usdc), "only USDC can be repay");
         User storage user = users[msg.sender];
         uint256 interest = getInterest(user.usdcDebt, user.lastBorrowBlock, block.number);
         require(user.usdcDebt >= amount, "amount cannot exceed debt");
@@ -84,20 +84,36 @@ contract DreamAcademyLending is IDreamAcademyLending, Ownable{
     }
 
     function liquidate(address user, address tokenAddress, uint256 amount) public {
+        require(amount > 0, "amount cannot be zero");
+        require(tokenAddress == address(usdc), "only USDC can be liquidated");
+        //require(getUserLTV(user) * 100 / getBorrowLTV());
+        User storage user = users[user];
 
     }
 
     function withdraw(address tokenAddress, uint256 amount) public {
-
+        if (tokenAddress == address(0)) {
+            require(users[msg.sender].ethCollateral >= amount,"Insufficient balance");
+            users[msg.sender].ethCollateral -= amount;
+            payable(msg.sender).transfer(amount);
+        } else {
+            require(users[msg.sender].usdcBalance >= amount,"Insufficient balance");
+            users[msg.sender].usdcBalance -= amount;
+            IERC20(tokenAddress).transfer(msg.sender,amount);
+        }
     }
 
     function getAccruedSupplyAmount(address tokenAddress) external payable returns (uint256) {
+    }
 
+    function getCurrentPrice() public view returns (uint256 ethPrice, uint256 usdcPrice) {
+        ethPrice = dreamoracle.getPrice(address(0));
+        usdcPrice = dreamoracle.getPrice(address(usdc));
     }
 
     function getBorrowLTV(uint256 amount) public view returns (uint256) {
-        uint256 ethValue = (amount * dreamoracle.getPrice(address(0))) / DECIMAL; // get total ETH value in USDC terms
-        return ethValue * LTV / 100; // return additional LTV ratio (borrow / collateral)
+        uint256 ethValue = (amount * dreamoracle.getPrice(address(0))) / DECIMAL;
+        return ethValue * LTV / 100;
     }
 
     function getUserLTV(address user) public view returns (uint256) {
