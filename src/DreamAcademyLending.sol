@@ -34,7 +34,7 @@ contract DreamAcademyLending is IDreamAcademyLending, Ownable{
     event Deposit(address indexed user, address indexed tokenAddress, uint amount);
     event Borrow(address indexed user, address indexed tokenAddress, uint amount);
     event Repay(address indexed user, address indexed tokenAddress, uint amount);
-    event Liquidate(address indexed user, address indexed liquidator, address indexed tokenAddress, uint amount);
+    event Liquidate(address indexed user, address indexed tokenAddress, uint amount);
     event Withdraw(address indexed user, address indexed tokenAddress, uint amount);
 
     function initializeLendingProtocol(address _usdc) external payable onlyOwner {
@@ -86,12 +86,14 @@ contract DreamAcademyLending is IDreamAcademyLending, Ownable{
     function liquidate(address user, address tokenAddress, uint256 amount) public {
         require(amount > 0, "amount cannot be zero");
         require(tokenAddress == address(usdc), "only USDC can be liquidated");
-        //require(getUserLTV(user) * 100 / getBorrowLTV());
-        User storage user = users[user];
-
+        User storage user_s = users[user];
+        usdc.transferFrom(user, address(this), amount);
+        user_s.usdcDebt -= amount;
+        emit Liquidate(user, tokenAddress, amount);
     }
 
     function withdraw(address tokenAddress, uint256 amount) public {
+        require(amount > 0, "amount cannot be zero");
         if (tokenAddress == address(0)) {
             require(users[msg.sender].ethCollateral >= amount,"Insufficient balance");
             users[msg.sender].ethCollateral -= amount;
@@ -129,6 +131,10 @@ contract DreamAcademyLending is IDreamAcademyLending, Ownable{
         uint256 blocksElapsed = BlockNum - lastBlock;
         uint256 interest = (usdcDebt * ((INTEREST_RATE  ** blocksElapsed) -1)) / DECIMAL;
         return interest;
+    }
+
+    function healthCheck(address user) public view returns (bool) {
+
     }
 
 }
